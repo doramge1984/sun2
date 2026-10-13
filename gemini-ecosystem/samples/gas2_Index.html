@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font-family:sans-serif;margin:0;padding:16px;background:#f5f6f8;color:#222}
+h1{font-size:20px;margin:0 0 4px}
+.sub{font-size:13px;color:#666;margin-bottom:12px}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
+.bar a{background:#1a73e8;color:#fff;text-decoration:none;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:bold}
+.bar label{font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.card{background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.12);border-left:6px solid #34a853}
+.card.low{border-left-color:#f9ab00}
+.card.crit{border-left-color:#d93025}
+.nm{font-weight:bold;font-size:15px}
+.now{font-size:26px;font-weight:bold;margin:4px 0}
+.now small{font-size:13px;font-weight:normal;color:#666}
+.meter{height:8px;background:#e8eaed;border-radius:4px;overflow:hidden;margin:6px 0}
+.meter i{display:block;height:100%;background:#34a853}
+.low .meter i{background:#f9ab00}
+.crit .meter i{background:#d93025}
+.meta{font-size:12px;color:#666}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:bold;background:#e6f4ea;color:#137333}
+.low .badge{background:#fef7e0;color:#b06000}
+.crit .badge{background:#fce8e6;color:#c5221f}
+h2{font-size:16px;margin:20px 0 8px}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;font-size:13px}
+th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
+th{background:#f1f3f4}
+.in{color:#137333;font-weight:bold}.out{color:#c5221f;font-weight:bold}
+@media (max-width:600px){
+ thead{display:none}
+ tr{display:block;border-bottom:8px solid #f5f6f8;padding:6px 0}
+ td{display:flex;gap:8px;border:0;padding:3px 10px}
+ td:before{content:attr(data-l);min-width:56px;color:#888;font-size:12px}
+}
+</style>
+</head>
+<body>
+<h1>📦 원부자재 재고 현황</h1>
+<div class="sub" id="sum">불러오는 중…</div>
+<div class="bar">
+  <a id="formLink" href="#" target="_blank" style="display:none">+ 입출고 입력하기</a>
+  <label><input type="checkbox" id="onlyLow"> 부족한 품목만 보기</label>
+</div>
+<div class="grid" id="cards"></div>
+<h2>최근 입출고 기록 (최근 30건)</h2>
+<table><thead><tr><th>일자</th><th>구분</th><th>품목</th><th>수량</th><th>담당자</th><th>비고</th></tr></thead><tbody id="logs"></tbody></table>
+
+<script>
+// 입력 폼 주소를 넣으면 위쪽에 '입출고 입력하기' 버튼이 나타납니다. (비워 두면 숨김)
+var FORM_URL = '';
+var DATA = null;
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function num(n){ return Number(n).toLocaleString('ko-KR'); }
+
+if (FORM_URL) { var a = document.getElementById('formLink'); a.href = FORM_URL; a.style.display = 'inline-block'; }
+document.getElementById('onlyLow').onchange = draw;
+
+google.script.run
+  .withSuccessHandler(function(d){ DATA = d; draw(); })
+  .withFailureHandler(function(e){ document.getElementById('sum').textContent = '불러오기 실패: ' + e.message; })
+  .getStock();
+
+function draw(){
+  if (!DATA) return;
+  var only = document.getElementById('onlyLow').checked;
+  var low = DATA.items.filter(function(x){ return x.status !== '정상'; }).length;
+  document.getElementById('sum').innerHTML = '품목 ' + DATA.items.length + '개 · <b style="color:' + (low ? '#c5221f' : '#137333') + '">부족 ' + low + '개</b>';
+  var h = '';
+  DATA.items.forEach(function(x){
+    if (only && x.status === '정상') return;
+    var cls = x.status === '긴급' ? 'crit' : (x.status === '부족' ? 'low' : '');
+    var pct = x.safe > 0 ? Math.max(0, Math.min(100, Math.round(x.now / (x.safe * 2) * 100))) : 100;
+    h += '<div class="card ' + cls + '"><div class="nm">' + esc(x.name) + '</div>'
+      + '<div class="now">' + num(x.now) + ' <small>' + esc(x.unit) + '</small></div>'
+      + '<div class="meter"><i style="width:' + pct + '%"></i></div>'
+      + '<span class="badge">' + esc(x.status) + '</span> '
+      + '<div class="meta">안전재고 ' + num(x.safe) + esc(x.unit) + ' · 입고 ' + num(x.inQty) + ' · 출고 ' + num(x.outQty) + '</div></div>';
+  });
+  document.getElementById('cards').innerHTML = h || '<div class="meta">표시할 품목이 없습니다.</div>';
+  var t = '';
+  DATA.logs.forEach(function(l){
+    t += '<tr><td data-l="일자">' + esc(l.date) + '</td><td data-l="구분" class="' + (l.kind === '입고' ? 'in' : 'out') + '">' + esc(l.kind)
+      + '</td><td data-l="품목">' + esc(l.name) + '</td><td data-l="수량">' + num(l.qty)
+      + '</td><td data-l="담당자">' + esc(l.manager) + '</td><td data-l="비고">' + esc(l.note) + '</td></tr>';
+  });
+  document.getElementById('logs').innerHTML = t || '<tr><td colspan="6">기록이 없습니다.</td></tr>';
+}
+</script>
+</body>
+</html>
